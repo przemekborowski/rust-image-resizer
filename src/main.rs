@@ -19,7 +19,7 @@ struct ImagePath {
 #[derive(Deserialize)]
 struct ImageQuery {
     radius: Option<u32>,
-    gradient: Option<f64>
+    gradient: Option<u32>
 }
 
 #[tokio::main]
@@ -56,7 +56,6 @@ async fn get_image(
         }
     };
     let width = path.width;
-    //TODO: why not use height? maybe we can ignore it and just calculate the height based on the
 
     let resize_task = tokio::task::spawn_blocking(move || {
         let mut image = ops::thumbnail_buffer(&bytes, width as i32)
@@ -65,10 +64,10 @@ async fn get_image(
         let w = image.get_width();
         let h = image.get_height();
 
-        let gradient_value = query.gradient.unwrap_or(0.0);
-        if gradient_value > 0.0 {
+        let gradient_value = query.gradient.unwrap_or(0).clamp(0, 100);
+        if gradient_value > 0 {
 
-            let grad_img = create_svg_gradient(w, h, gradient_value)
+            let grad_img = create_svg_gradient(w, h, gradient_value as f64 / 100.0)
                 .map_err(|_| "Failed to create SVG gradient")?;
 
             image = ops::composite_2(&image, &grad_img, libvips::ops::BlendMode::Over)
