@@ -19,7 +19,7 @@ struct ImagePath {
 #[derive(Deserialize)]
 struct ImageQuery {
     radius: Option<u32>,
-    gradient: Option<bool>
+    gradient: Option<f64>
 }
 
 #[tokio::main]
@@ -65,8 +65,10 @@ async fn get_image(
         let w = image.get_width();
         let h = image.get_height();
 
-        if query.gradient.unwrap_or(false) {
-            let grad_img = create_svg_gradient(w, h)
+        let gradient_value = query.gradient.unwrap_or(0.0);
+        if gradient_value > 0.0 {
+
+            let grad_img = create_svg_gradient(w, h, gradient_value)
                 .map_err(|_| "Failed to create SVG gradient")?;
 
             image = ops::composite_2(&image, &grad_img, libvips::ops::BlendMode::Over)
@@ -182,8 +184,8 @@ fn create_svg_border(
 }
 
 
-fn create_svg_gradient(width: i32, height: i32) -> Result<VipsImage, libvips::error::Error> {
-    let grad_height = height as f64 * 0.33;
+fn create_svg_gradient(width: i32, height: i32, gradient: f64) -> Result<VipsImage, libvips::error::Error> {
+    let grad_height = height as f64 * gradient;
     let start_y = height as f64 - grad_height;
 
     let svg = format!(
