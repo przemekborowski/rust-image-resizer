@@ -26,8 +26,6 @@ WORKDIR /app
 
 COPY --from=builder /usr/src/app/target/release/resizer /usr/local/bin/resizer
 
-COPY public ./public
-
 EXPOSE 3333
 
 CMD ["resizer"]
