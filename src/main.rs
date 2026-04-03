@@ -38,7 +38,7 @@ pub struct AppState {
 pub enum AppError {
     ImageProcessing(String),
     TaskFailed,
-    FileNotFound,
+    NetworkError(String),
 }
 
 impl IntoResponse for AppError {
@@ -52,9 +52,9 @@ impl IntoResponse for AppError {
                 println!("Tokio Thread Crash!");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server thread failed".to_string())
             }
-            AppError::FileNotFound=> {
-                println!("File not found!");
-                (StatusCode::INTERNAL_SERVER_ERROR, "File not found".to_string())
+            AppError::NetworkError(msg) => {
+                println!("Network error: {}", msg);
+                (StatusCode::BAD_GATEWAY, format!("Failed to fetch upstream image: {}", msg))
             }
         };
         (status, error_message).into_response()
@@ -96,7 +96,7 @@ async fn get_image(
     println!("Requested image {} {} with width {}, radius {}", id, file, width, radius);
 
     let cache_key = ImageCacheKey {
-        id,
+        id: id.clone(),
         file,
         width,
         radius,
@@ -111,14 +111,23 @@ async fn get_image(
         ).into_response());
     }
 
-    let file_path = "public/template.png";
-    let bytes = match tokio::fs::read(file_path).await {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("Failed to read file: {}", e);
-            return Err(AppError::FileNotFound);
-        }
-    };
+    let upstream_url = format!("https://picsum.photos/seed/{}/{}/{}", id.clone(), width, (width as f64 * 1.5) as u32);
+
+    let response = reqwest::get(&upstream_url)
+        .await
+        .map_err(|e| AppError::NetworkError(e.to_string()))?;
+
+    // 3. Ensure the provider didn't return a 404 or 500
+    if !response.status().is_success() {
+        return Err(AppError::NetworkError("Image provider returned an error status".to_string()));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| AppError::NetworkError(e.to_string()))?
+        .to_vec();
+
 
     let image_bytes = tokio::task::spawn_blocking(move || {
         let mut image = ops::thumbnail_buffer(&bytes, width as i32)
@@ -139,16 +148,13 @@ async fn get_image(
         if radius > 0 {
             let mask_alpha = masks::create_svg_mask(w, h, radius as f64)
                 .map_err(|_| "Failed to calculate SVG mask")?;
+            let srgb_image = ops::colourspace(&image, libvips::ops::Interpretation::Srgb).unwrap_or(image);
 
-            let srgb_image = ops::colourspace(&image, libvips::ops::Interpretation::Srgb)
-                .unwrap_or(image);
-
-            let r = ops::extract_band(&srgb_image, 0).map_err(|_| "Failed to extract R")?;
-            let g = ops::extract_band(&srgb_image, 1).map_err(|_| "Failed to extract G")?;
-            let b = ops::extract_band(&srgb_image, 2).map_err(|_| "Failed to extract B")?;
-
-            let mut rgb_bands = vec![r, g, b];
-            let clean_rgb = ops::bandjoin(&mut rgb_bands).map_err(|_| "Failed to join RGB")?;
+            let clean_rgb = if srgb_image.get_bands() > 3 {
+                ops::flatten(&srgb_image).unwrap_or(srgb_image)
+            } else {
+                srgb_image
+            };
 
             let mut final_bands = vec![clean_rgb, mask_alpha];
             image = ops::bandjoin(&mut final_bands).map_err(|_| "Failed to apply alpha mask")?;
