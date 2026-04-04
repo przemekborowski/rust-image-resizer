@@ -111,7 +111,7 @@ async fn get_image(
         ).into_response());
     }
 
-    let upstream_url = format!("https://picsum.photos/seed/{}/{}/{}", id.clone(), width, (width as f64 * 1.5) as u32);
+    let upstream_url = format!("https://picsum.photos/seed/{}/{}/{}", id.clone(), 1000, (1000.0 * 1.5) as u32);
 
     let response = reqwest::get(&upstream_url)
         .await
