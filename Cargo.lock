@@ -1153,6 +1153,7 @@ name = "resizer"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "bytes",
  "libvips",
  "moka",
  "reqwest",

@@ -7,10 +7,11 @@ use axum::{
 };
 use serde::Deserialize;
 use tokio::net::TcpListener;
-use libvips::{ops};
 use moka::future::Cache;
+use std::time::Instant;
 
 mod masks;
+mod processor;
 
 #[derive(Deserialize)]
 struct ImageQuery {
@@ -113,11 +114,12 @@ async fn get_image(
 
     let upstream_url = format!("https://picsum.photos/seed/{}/{}/{}", id.clone(), 1000, (1000.0 * 1.5) as u32);
 
+    let download_start = Instant::now();
     let response = reqwest::get(&upstream_url)
         .await
         .map_err(|e| AppError::NetworkError(e.to_string()))?;
 
-    // 3. Ensure the provider didn't return a 404 or 500
+
     if !response.status().is_success() {
         return Err(AppError::NetworkError("Image provider returned an error status".to_string()));
     }
@@ -125,55 +127,20 @@ async fn get_image(
     let bytes = response
         .bytes()
         .await
-        .map_err(|e| AppError::NetworkError(e.to_string()))?
-        .to_vec();
+        .map_err(|e| AppError::NetworkError(e.to_string()))?;
 
+    let download_time = download_start.elapsed();
+    println!("Download took: {:?}", download_time);
 
+    let process_start = Instant::now();
     let image_bytes = tokio::task::spawn_blocking(move || {
-        let mut image = ops::thumbnail_buffer(&bytes, width as i32)
-            .map_err(|_| "Failed to thumbnail image")?;
-
-        let w = image.get_width();
-        let h = image.get_height();
-
-        if gradient > 0 {
-
-            let grad_img = masks::create_svg_gradient(w, h, gradient as f64 / 100.0)
-                .map_err(|_| "Failed to create SVG gradient")?;
-
-            image = ops::composite_2(&image, &grad_img, libvips::ops::BlendMode::Over)
-                .map_err(|_| "Failed to composite gradient")?;
-        }
-
-        if radius > 0 {
-            let mask_alpha = masks::create_svg_mask(w, h, radius as f64)
-                .map_err(|_| "Failed to calculate SVG mask")?;
-            let srgb_image = ops::colourspace(&image, libvips::ops::Interpretation::Srgb).unwrap_or(image);
-
-            let clean_rgb = if srgb_image.get_bands() > 3 {
-                ops::flatten(&srgb_image).unwrap_or(srgb_image)
-            } else {
-                srgb_image
-            };
-
-            let mut final_bands = vec![clean_rgb, mask_alpha];
-            image = ops::bandjoin(&mut final_bands).map_err(|_| "Failed to apply alpha mask")?;
-
-        }
-        let border_img = masks::create_svg_border(w, h, radius as f64)
-            .map_err(|_| "Failed to create SVG border")?;
-
-        image = ops::composite_2(&image, &border_img, libvips::ops::BlendMode::Over)
-            .map_err(|_| "Failed to composite border")?;
-
-        let webp_bytes = ops::webpsave_buffer(&image)
-            .map_err(|_| "Failed to encode to WebP")?;
-
-        Ok::<Vec<u8>, &'static str>(webp_bytes)
+        processor::process_image(bytes, width, radius, gradient)
     })
     .await
     .map_err(|_| AppError::TaskFailed)?
     .map_err(|e| AppError::ImageProcessing(e.to_string()))?;
+    let process_time = process_start.elapsed();
+    println!("libvips Processing took: {:?}", process_time);
 
     state.cache.insert(cache_key, image_bytes.clone()).await;
     Ok((

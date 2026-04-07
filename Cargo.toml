@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = "0.8.8"
+bytes = "1.11.1"
 libvips = "1.7.3"
 moka = { version = "0.12.15", features = ["future"] }
 reqwest = "0.13.2"
