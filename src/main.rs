@@ -16,7 +16,8 @@ mod processor;
 #[derive(Deserialize)]
 struct ImageQuery {
     radius: Option<u32>,
-    gradient: Option<u32>
+    gradient: Option<u32>,
+    blur: Option<u32>,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -26,6 +27,7 @@ pub struct ImageCacheKey {
     pub width: u32,
     pub radius: u32,
     pub gradient: u32,
+    pub blur: u32,
 }
 
 #[derive(Clone)]
@@ -93,8 +95,9 @@ async fn get_image(
 ) -> Result<Response, AppError> {
     let radius = query.radius.unwrap_or(0).clamp(0, 50);
     let gradient = query.gradient.unwrap_or(0).clamp(0, 100);
+    let blur = query.blur.unwrap_or(0).clamp(0, 100);
 
-    println!("Requested image {} {} with width {}, radius {}", id, file, width, radius);
+    println!("Requested image {} {} with width {}", id, file, width);
 
     let cache_key = ImageCacheKey {
         id: id.clone(),
@@ -102,6 +105,7 @@ async fn get_image(
         width,
         radius,
         gradient,
+        blur,
     };
 
     if let Some(cached_bytes) = state.cache.get(&cache_key).await {
@@ -134,7 +138,7 @@ async fn get_image(
 
     let process_start = Instant::now();
     let image_bytes = tokio::task::spawn_blocking(move || {
-        processor::process_image(bytes, width, radius, gradient)
+        processor::process_image(bytes, width, radius, gradient, blur)
     })
     .await
     .map_err(|_| AppError::TaskFailed)?

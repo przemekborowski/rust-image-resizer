@@ -8,12 +8,19 @@ pub fn process_image(
     width: u32,
     radius: u32,
     gradient: u32,
+    blur: u32,
 ) -> Result<Vec<u8>, String> {
         let mut image = ops::thumbnail_buffer(&bytes, width as i32)
             .map_err(|_| "Failed to thumbnail image")?;
 
         let w = image.get_width();
         let h = image.get_height();
+
+        if blur > 0 {
+            let sigma = (blur as f64) / 10.0;
+            image = ops::gaussblur(&image, sigma)
+                .map_err(|_| "Failed to apply Gaussian blur")?;
+        }
 
         if gradient > 0 {
 
